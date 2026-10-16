@@ -139,13 +139,13 @@ lodestar.example.com {
 
 ### Backups
 
-Everything lives in `DATA_DIR`: the database `lodestar.sqlite` and the uploaded files in `images/`. Back up by copying that directory. For a consistent copy while the server is running, snapshot the database first and copy the images alongside it:
+Everything lives in `DATA_DIR`: the database `lodestar.sqlite` and the uploaded files in `images/`. Back up by copying that directory. For a consistent copy while the server is running, snapshot the database first and copy the images alongside it. This needs the `sqlite3` command-line tool. Set `DATA_DIR` to the same directory the server uses (in the Docker example above, that is the host directory mounted at `/data`) and `BACKUP_DIR` to an existing directory:
 
 ```sh
-cd "$DATA_DIR"
-sqlite3 lodestar.sqlite "VACUUM INTO 'backup.sqlite'"
-cp -r images /path/to/backup/
-mv backup.sqlite /path/to/backup/
+export DATA_DIR=/var/lib/lodestar BACKUP_DIR=/path/to/backup
+[ -f "$DATA_DIR/lodestar.sqlite" ] \
+  && sqlite3 "$DATA_DIR/lodestar.sqlite" "VACUUM INTO '$BACKUP_DIR/lodestar.sqlite'" \
+  && cp -r "$DATA_DIR/images" "$BACKUP_DIR/"
 ```
 
 ### Tests
