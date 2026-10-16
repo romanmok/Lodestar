@@ -93,3 +93,13 @@ test('externalizeImages / inlineImages', () => {
   assert.deepEqual(inlineImages(out, store), input);
   assert.equal(inlineImages('/api/images/' + 'a'.repeat(32) + '.png', store), '/api/images/' + 'a'.repeat(32) + '.png');
 });
+
+test('externalizeImages leaves empty/invalid base64 unchanged', () => {
+  const dir = join(mkdtempSync(join(tmpdir(), 'img-')), 'images');
+  const store = createImageStore(dir);
+  const bad = ['data:image/png;base64,', 'data:image/png;base64,!!!@@@', 'data:image/png;base64,abc$def', 'data:image/png;base64,   '];
+  assert.deepEqual(externalizeImages(bad, store), bad);
+  assert.equal(readdirSync(dir).length, 0);
+  const ok = `data:image/png;base64,${PNG_B64.slice(0, 20)}\n${PNG_B64.slice(20)}`;
+  assert.match(externalizeImages(ok, store), /^\/api\/images\/[0-9a-f]{32}\.png$/);
+});

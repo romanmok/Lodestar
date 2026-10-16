@@ -55,7 +55,11 @@ export function externalizeImages(value, store) {
     const m = DATA_URL_RE.exec(s);
     if (!m) return s;
     const mime = `image/${m[1]}`;
-    return store.save(Buffer.from(s.slice(m[0].length), 'base64'), mime).url;
+    const payload = s.slice(m[0].length).replace(/\s+/g, '');
+    const buf = Buffer.from(payload, 'base64');
+    // Leave empty or non-base64 payloads untouched rather than store a corrupt file.
+    if (!buf.length || buf.toString('base64').replace(/=+$/, '') !== payload.replace(/=+$/, '')) return s;
+    return store.save(buf, mime).url;
   });
 }
 
