@@ -236,7 +236,7 @@
 ### Task 7: Client — upload images instead of data URLs
 
 **Files:**
-- Modify: `app.js`: `loadMapFile` (app.js:1064), `loadSplashFile` (app.js:1100), `bulkAddTokenImages` (app.js:3311), `loadTokenImage` (app.js:3378), `addImageFromDataURL` (app.js:3944)
+- Modify: `app.js`: `loadMapFile` (app.js:1064), `loadSplashFile` (app.js:1100), `bulkAddTokenImages` (app.js:3311), `loadTokenImage` (app.js:3379), `addImageFromDataURL` (app.js:3944)
 
 **Interfaces:**
 - Consumes: `ONLINE`
