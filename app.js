@@ -2007,27 +2007,11 @@ async function restoreSession() {
   // Retry the GET (2 s doubling, capped at 30 s) until it succeeds; autosave stays off
   // until then so an unrestored empty state can never overwrite the saved session.
   let delay = 2000;
+  let res;
   for (;;) {
     try {
-      const res = await api("GET", "/api/session");
-      if (res && res.state) {
-        shell.classList.remove("is-demo");
-        drawingRoom = [];
-        activeStroke = null;
-        undoStack.length = 0;
-        redoStack.length = 0;
-        updateUndoButtons();
-        loadSnapshot(migrateState(res.state, SAVE_FILE_VERSION));
-        syncControlsFromState();
-        broadcastAssets();
-        renderAndSync();
-        sessionRestored = true; // after renderAndSync, so the restore itself is not re-saved
-        setSaveIndicator(null);
-        return true;
-      }
-      sessionRestored = true; // nothing saved yet: fresh session, autosave may begin
-      setSaveIndicator(null);
-      return false;
+      res = await api("GET", "/api/session");
+      break;
     } catch (error) {
       console.error("could not restore session", error);
       setSaveIndicator("Couldn't load saved session \u2014 retrying");
@@ -2035,6 +2019,32 @@ async function restoreSession() {
       delay = Math.min(delay * 2, 30000);
     }
   }
+  if (!res || !res.state) {
+    sessionRestored = true; // nothing saved yet: fresh session, autosave may begin
+    setSaveIndicator(null);
+    return false;
+  }
+  try {
+    shell.classList.remove("is-demo");
+    drawingRoom = [];
+    activeStroke = null;
+    undoStack.length = 0;
+    redoStack.length = 0;
+    updateUndoButtons();
+    loadSnapshot(migrateState(res.state, SAVE_FILE_VERSION));
+    syncControlsFromState();
+    broadcastAssets();
+    renderAndSync();
+  } catch (error) {
+    // A corrupt or too-new saved state fails the same way every time, so don't retry.
+    // Autosave stays off for this tab so the server copy is not overwritten.
+    console.error("could not open saved session", error);
+    setSaveIndicator("Saved session couldn't be opened \u2014 autosave off");
+    return false;
+  }
+  sessionRestored = true; // after renderAndSync, so the restore itself is not re-saved
+  setSaveIndicator(null);
+  return true;
 }
 
 // Lightweight view-only message, coalesced to one per frame for smooth pan/zoom.
