@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { openDb } from './db.js';
 import { createAuth, isHttps } from './auth.js';
 import { serveStatic } from './static.js';
+import { createImageStore, mimeToExt, extToMime } from './images.js';
 import { HttpError, sendError, readBody, sendJson } from './http-util.js';
 
 // Canonical form of the request path (decoded, normalized, case-folded) so encoded
@@ -20,7 +21,8 @@ function isEntryPage(pathname) {
 export function createApp({ dataDir, password }) {
   const db = openDb(path.join(dataDir, 'lodestar.sqlite'));
   const auth = createAuth({ db, password });
-  const ctx = { dataDir, password, db, auth };
+  const images = createImageStore(path.join(dataDir, 'images'));
+  const ctx = { dataDir, password, db, auth, images };
   const loginHtml = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'login.html'));
 
   async function handle(req, res) {
@@ -52,6 +54,30 @@ export function createApp({ dataDir, password }) {
     if (p.startsWith('/api/') && !auth.requireGm(req, res)) return;
     // The HTML entry is GM-only; other static assets stay public.
     if (isEntryPage(p) && !auth.requireGm(req, res)) return;
+
+    if (req.method === 'POST' && p === '/api/images') {
+      const mime = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+      if (!mimeToExt(mime)) {
+        req.resume();
+        return sendError(res, 415, 'Unsupported image type');
+      }
+      const buf = await readBody(req, 25 * 1024 * 1024); // 413 on overflow; remaining upload is drained
+      if (!buf.length) return sendError(res, 400, 'Empty body');
+      return sendJson(res, 201, images.save(buf, mime));
+    }
+    if (req.method === 'GET' && p.startsWith('/api/images/')) {
+      let id = '';
+      try { id = decodeURIComponent(p.slice('/api/images/'.length)); } catch { /* 404 */ }
+      const file = images.path(id);
+      if (!file) return sendError(res, 404, 'Not found');
+      const bytes = fs.readFileSync(file);
+      res.writeHead(200, {
+        'content-type': extToMime(id),
+        'content-length': bytes.length,
+        'cache-control': 'private, max-age=31536000, immutable',
+      });
+      return void res.end(bytes);
+    }
 
     // Later tasks: add API routes here, before static.
     if (await serveStatic(req, res, url.pathname)) return;
