@@ -81,15 +81,17 @@ Uploaded images are limited to 25 MB each, and a single saved map or import requ
 
 ### Running with PM2 + nginx
 
-Without Docker, run the server directly. Node 22.13 or newer is required, and no `npm install` is needed. Create `ecosystem.config.cjs` next to the checkout:
+Without Docker, run the server directly. Node 22.13 or newer is required, and no `npm install` is needed. The examples assume the checkout is at `/opt/lodestar`. Create `ecosystem.config.cjs` **outside the checkout** (for example `/etc/lodestar/ecosystem.config.cjs`, readable only by the PM2 user): it contains the GM password, so it must never be committed to git.
 
 ```js
 module.exports = {
   apps: [{
     name: "lodestar",
-    script: "server/index.js",
+    cwd: "/opt/lodestar",
+    script: "/opt/lodestar/server/index.js",
     node_args: "--disable-warning=ExperimentalWarning",
     env: {
+      HOST: "127.0.0.1",
       PORT: 8080,
       DATA_DIR: "/var/lib/lodestar",
       LODESTAR_GM_PASSWORD: "choose-a-strong-password",
@@ -98,13 +100,20 @@ module.exports = {
 };
 ```
 
+`DATA_DIR` must exist and be writable by the user PM2 runs as (for example `sudo mkdir -p /var/lib/lodestar && sudo chown "$USER" /var/lib/lodestar`).
+
 ```sh
-pm2 start ecosystem.config.cjs && pm2 save
+pm2 start /etc/lodestar/ecosystem.config.cjs && pm2 save
 ```
 
-Then put nginx in front of it (`/etc/nginx/sites-available/lodestar.example.com`):
+Then put nginx in front of it (`/etc/nginx/sites-available/lodestar.example.com`). The port in `proxy_pass` must equal the server's `PORT`, and with the default `HOST=127.0.0.1` the server is reachable only through nginx:
 
 ```nginx
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
 server {
     listen 80;
     server_name lodestar.example.com;
@@ -115,16 +124,18 @@ server {
         proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Connection $connection_upgrade;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```
 
-Enable the site, reload nginx, then get a certificate (certbot adds the HTTPS server block and redirect):
+Enable the site, check the config and reload nginx, then get a certificate (certbot adds the HTTPS server block and redirect):
 
 ```sh
+ln -s /etc/nginx/sites-available/lodestar.example.com /etc/nginx/sites-enabled/
+nginx -t && systemctl reload nginx
 certbot --nginx -d lodestar.example.com
 ```
 
