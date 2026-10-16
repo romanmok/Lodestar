@@ -28,12 +28,33 @@ async function readJson(req) {
   try { return JSON.parse(buf.toString()); } catch { throw new HttpError(400, 'Invalid JSON'); }
 }
 
-export function createApp({ dataDir, password }) {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+export function createApp({ dataDir, password, loginDelayMs = 1050, lockoutBaseMs = 30000, lockoutMaxMs = 900000 }) {
   const db = openDb(path.join(dataDir, 'lodestar.sqlite'));
   const auth = createAuth({ db, password });
   const images = createImageStore(path.join(dataDir, 'images'));
   const ctx = { dataDir, password, db, auth, images };
   const loginHtml = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'login.html'));
+
+  // Login attempts are evaluated one at a time (global queue), so the failure delay
+  // throttles parallel guessing too. 10 consecutive failures start a global lockout
+  // that doubles with every further failure; a successful login resets it.
+  let loginQueue = Promise.resolve();
+  let failures = 0;
+  let lockedUntil = 0;
+  function attemptLogin(pw) {
+    const run = loginQueue.then(async () => {
+      if (Date.now() < lockedUntil) return 'locked';
+      if (auth.checkPassword(pw)) { failures = 0; lockedUntil = 0; return 'ok'; }
+      failures++;
+      if (failures >= 10) lockedUntil = Date.now() + Math.min(lockoutBaseMs * 2 ** (failures - 10), lockoutMaxMs);
+      await sleep(loginDelayMs);
+      return 'wrong';
+    });
+    loginQueue = run.catch(() => {});
+    return run;
+  }
 
   async function handle(req, res) {
     const url = new URL(req.url, 'http://localhost');
@@ -49,10 +70,9 @@ export function createApp({ dataDir, password }) {
       try { pw = JSON.parse((await readBody(req, 4096)).toString()).password; } catch (e) {
         if (e instanceof HttpError) throw e;
       }
-      if (!auth.checkPassword(pw)) {
-        await new Promise((r) => setTimeout(r, 1050));
-        return sendError(res, 401, 'Wrong password');
-      }
+      const result = await attemptLogin(pw);
+      if (result === 'locked') return sendError(res, 429, 'Too many attempts, try again later');
+      if (result === 'wrong') return sendError(res, 401, 'Wrong password');
       res.setHeader('set-cookie', auth.issueCookie(isHttps(req)));
       return sendJson(res, 200, { ok: true });
     }

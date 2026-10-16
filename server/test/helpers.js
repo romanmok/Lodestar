@@ -5,9 +5,9 @@ import { createApp } from '../app.js';
 
 export const TEST_PASSWORD = 'test-pass';
 
-export async function startTestServer({ dataDir: givenDir, password = TEST_PASSWORD } = {}) {
+export async function startTestServer({ dataDir: givenDir, password = TEST_PASSWORD, ...options } = {}) {
   const dataDir = givenDir || await mkdtemp(join(tmpdir(), 'lodestar-test-'));
-  const app = createApp({ dataDir, password });
+  const app = createApp({ dataDir, password, ...options });
   await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve));
   const { port } = app.server.address();
   const url = `http://127.0.0.1:${port}`;
