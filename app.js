@@ -1992,6 +1992,7 @@ let sessionRestored = false;
 let sessionSaveTimer = null;
 let sessionSaveInFlight = false;
 let sessionSavePending = false;
+let sessionRetryDelay = 2000; // backoff after a failed save: 2 s doubling, capped at 30 s
 
 function setSaveIndicator(text) {
   let el = document.getElementById("saveIndicator");
@@ -2024,9 +2025,14 @@ async function flushSessionSave() {
   try {
     captureCurrentFloor();
     await api("PUT", "/api/session", { state: JSON.parse(JSON.stringify(state)) });
+    sessionRetryDelay = 2000;
     setSaveIndicator(null);
   } catch {
-    setSaveIndicator("Not saved \u2014 retrying"); // retried on the next change
+    setSaveIndicator("Not saved \u2014 retrying");
+    // Retry on a backoff; a new change replaces this timer with the normal debounce.
+    clearTimeout(sessionSaveTimer);
+    sessionSaveTimer = setTimeout(flushSessionSave, sessionRetryDelay);
+    sessionRetryDelay = Math.min(sessionRetryDelay * 2, 30000);
   } finally {
     sessionSaveInFlight = false;
     if (sessionSavePending) {
