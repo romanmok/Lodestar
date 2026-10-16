@@ -1,7 +1,7 @@
 # Online Play — Design
 
 **Date:** 2026-10-16
-**Status:** Draft — awaiting review
+**Status:** Approved
 **Branch:** `online` (fork `romanmok/Lodestar`)
 
 ## Why
