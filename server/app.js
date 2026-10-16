@@ -159,6 +159,8 @@ export function createApp({ dataDir, password, loginDelayMs = 1050, lockoutBaseM
   }
 
   const server = http.createServer((req, res) => {
+    res.setHeader('x-content-type-options', 'nosniff');
+    res.setHeader('x-frame-options', 'SAMEORIGIN');
     handle(req, res).catch((err) => {
       if (res.headersSent) { res.destroy(); return; }
       if (err instanceof HttpError) return sendError(res, err.status, err.message);
