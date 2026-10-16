@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { openDb } from './db.js';
 import { createAuth, isHttps } from './auth.js';
 import { serveStatic } from './static.js';
-import { createImageStore, mimeToExt, extToMime } from './images.js';
+import { createImageStore, mimeToExt, extToMime, externalizeImages, inlineImages } from './images.js';
 import { HttpError, sendError, readBody, sendJson } from './http-util.js';
 
 // Canonical form of the request path (decoded, normalized, case-folded) so encoded
@@ -16,6 +16,16 @@ function isEntryPage(pathname) {
   if (d.includes('\\')) return true;
   const rel = path.posix.normalize(d).replace(/^\/+/, '').toLowerCase();
   return rel === '' || rel === 'index.html';
+}
+
+const APP_NAME = 'Battlemap Screen and GM Streaming Tool'; // keep in sync with app.js
+const SAVE_FILE_VERSION = 3;
+const JSON_LIMIT = 50 * 1024 * 1024;
+const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
+
+async function readJson(req) {
+  const buf = await readBody(req, JSON_LIMIT);
+  try { return JSON.parse(buf.toString()); } catch { throw new HttpError(400, 'Invalid JSON'); }
 }
 
 export function createApp({ dataDir, password }) {
@@ -79,7 +89,51 @@ export function createApp({ dataDir, password }) {
       return void res.end(bytes);
     }
 
-    // Later tasks: add API routes here, before static.
+    if (p === '/api/maps' && req.method === 'GET') return sendJson(res, 200, db.listMaps());
+    if (p.startsWith('/api/maps/')) {
+      let id;
+      try { id = decodeURIComponent(p.slice('/api/maps/'.length)); } catch { throw new HttpError(400, 'Bad id'); }
+      if (req.method === 'GET') {
+        const rec = db.getMap(id);
+        return rec ? sendJson(res, 200, rec) : sendError(res, 404, 'Not found');
+      }
+      if (req.method === 'PUT') {
+        const rec = await readJson(req);
+        if (!isObj(rec) || typeof rec.id !== 'string' || typeof rec.name !== 'string' || !isObj(rec.state)) {
+          throw new HttpError(400, 'Invalid map record');
+        }
+        if (rec.id !== id) throw new HttpError(400, 'Id mismatch');
+        db.putMap(externalizeImages(rec, images));
+        return sendJson(res, 200, { ok: true });
+      }
+      if (req.method === 'DELETE') {
+        db.deleteMap(id);
+        res.writeHead(204);
+        return void res.end();
+      }
+    }
+    if (p === '/api/export' && req.method === 'GET') {
+      return sendJson(res, 200, {
+        app: APP_NAME,
+        version: SAVE_FILE_VERSION,
+        exportedAt: new Date().toISOString(),
+        maps: inlineImages(db.listMaps(), images),
+      });
+    }
+    if (p === '/api/session') {
+      if (req.method === 'GET') {
+        const state = db.kvGet('session');
+        if (state === undefined) { res.writeHead(204); return void res.end(); }
+        return sendJson(res, 200, { state });
+      }
+      if (req.method === 'PUT') {
+        const body = await readJson(req);
+        if (!isObj(body) || !isObj(body.state)) throw new HttpError(400, 'Invalid session');
+        db.kvSet('session', externalizeImages(body.state, images));
+        return sendJson(res, 200, { ok: true });
+      }
+    }
+
     if (await serveStatic(req, res, url.pathname)) return;
     sendError(res, 404, 'Not found');
   }
