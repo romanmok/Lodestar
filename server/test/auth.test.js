@@ -88,3 +88,11 @@ test('logout', async () => {
 test('api requires login', async () => {
   assert.equal((await get('/api/maps')).status, 401);
 });
+
+test('GM page guard cannot be bypassed via encoded or cased paths', async () => {
+  for (const p of ['/%69ndex.html', '/%2findex.html', '/INDEX.HTML', '/Index.Html', '/./index.html', '/a/../index.html', '/%2e/index.html']) {
+    const r = await get(p);
+    assert.notEqual(r.status, 200, p);
+    assert.doesNotMatch(await r.text(), /app\.js/, p);
+  }
+});

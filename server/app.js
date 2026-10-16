@@ -7,6 +7,16 @@ import { createAuth, isHttps } from './auth.js';
 import { serveStatic } from './static.js';
 import { HttpError, sendError, readBody, sendJson } from './http-util.js';
 
+// Canonical form of the request path (decoded, normalized, case-folded) so encoded
+// or differently cased spellings of the entry page cannot slip past the guard.
+function isEntryPage(pathname) {
+  let d;
+  try { d = decodeURIComponent(pathname); } catch { return true; }
+  if (d.includes('\\')) return true;
+  const rel = path.posix.normalize(d).replace(/^\/+/, '').toLowerCase();
+  return rel === '' || rel === 'index.html';
+}
+
 export function createApp({ dataDir, password }) {
   const db = openDb(path.join(dataDir, 'lodestar.sqlite'));
   const auth = createAuth({ db, password });
@@ -41,7 +51,7 @@ export function createApp({ dataDir, password }) {
     // Everything else under /api/ requires a GM session (checked before route lookup).
     if (p.startsWith('/api/') && !auth.requireGm(req, res)) return;
     // The HTML entry is GM-only; other static assets stay public.
-    if ((p === '/' || p === '/index.html') && !auth.requireGm(req, res)) return;
+    if (isEntryPage(p) && !auth.requireGm(req, res)) return;
 
     // Later tasks: add API routes here, before static.
     if (await serveStatic(req, res, url.pathname)) return;
