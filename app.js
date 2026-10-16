@@ -1108,9 +1108,16 @@ function loadMapFile(event) {
 
   const reader = new FileReader();
   reader.onerror = () => window.alert("Could not read that image file.");
-  reader.onload = () => {
+  reader.onload = async () => {
+    let url;
+    try {
+      url = await uploadImage(reader.result);
+    } catch {
+      window.alert("Could not read that image file.");
+      return;
+    }
     shell.classList.remove("is-demo"); // your own map: drop the demo-map credit
-    state.imageData = reader.result;
+    state.imageData = url;
     state.imageName = file.name;
     state.imageId = uuid();
     state.map.scale = 1;
@@ -1144,8 +1151,15 @@ function loadSplashFile(event) {
 
   const reader = new FileReader();
   reader.onerror = () => window.alert("Could not read that image file.");
-  reader.onload = () => {
-    state.splash.imageData = reader.result;
+  reader.onload = async () => {
+    let url;
+    try {
+      url = await uploadImage(reader.result);
+    } catch {
+      window.alert("Could not read that image file.");
+      return;
+    }
+    state.splash.imageData = url;
     state.splash.imageName = file.name;
     state.splash.enabled = true;
     state.blackout = false;
@@ -1435,6 +1449,28 @@ function idbDeleteMapRecord(id) {
   return withMapStore("readwrite", (store) => store.delete(id));
 }
 
+function rejectIfUnauthorized(response) {
+  if (response.status !== 401) return;
+  location.href = "/login";
+  throw new Error("Not logged in");
+}
+
+// Online: store the image on the server and return its URL. Offline: keep the data URL as is.
+async function uploadImage(dataUrl) {
+  if (!ONLINE) return dataUrl;
+  const blob = await (await fetch(dataUrl)).blob();
+  const response = await fetch("/api/images", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": blob.type },
+    body: blob,
+  });
+  rejectIfUnauthorized(response);
+  if (!response.ok) throw new Error(`Image upload failed (${response.status})`);
+  const data = await response.json();
+  return data.url;
+}
+
 async function api(method, path, body) {
   const options = { method, credentials: "same-origin", headers: {} };
   if (body !== undefined) {
@@ -1442,10 +1478,7 @@ async function api(method, path, body) {
     options.body = JSON.stringify(body);
   }
   const response = await fetch(path, options);
-  if (response.status === 401) {
-    location.href = "/login";
-    throw new Error("Not logged in");
-  }
+  rejectIfUnauthorized(response);
   if (response.status === 204) return null;
   const text = await response.text();
   let data = null;
@@ -3517,8 +3550,13 @@ function bulkAddTokenImages(files) {
     reader.onerror = done;
     reader.onload = () => {
       downscaleImage(reader.result, TOKEN_IMAGE_MAX_EDGE, (data) => {
-        state.tokens.push({ id: uuid(), x: pos.x, y: pos.y, cells, color, label: "", image: data });
-        done();
+        uploadImage(data).then(
+          (url) => {
+            state.tokens.push({ id: uuid(), x: pos.x, y: pos.y, cells, color, label: "", image: url });
+            done();
+          },
+          done
+        );
       });
     };
     reader.readAsDataURL(file);
@@ -3569,8 +3607,15 @@ function loadTokenImage(event) {
   const reader = new FileReader();
   reader.onerror = () => window.alert("Could not read that image file.");
   reader.onload = () => {
-    downscaleImage(reader.result, TOKEN_IMAGE_MAX_EDGE, (data) => {
-      tokenImageData = data;
+    downscaleImage(reader.result, TOKEN_IMAGE_MAX_EDGE, async (data) => {
+      let url;
+      try {
+        url = await uploadImage(data);
+      } catch {
+        window.alert("Could not read that image file.");
+        return;
+      }
+      tokenImageData = url;
       // If a token is selected in Move mode, re-skin it immediately; otherwise this image
       // becomes the default for newly dropped tokens.
       if (selectedToken) {
@@ -4131,12 +4176,19 @@ function swapPdf(rec) {
 function addImageFromDataURL(rawSrc, nx, ny) {
   downscaleImage(rawSrc, IMAGE_MAX_EDGE, (src) => {
     const probe = new Image();
-    probe.onload = () => {
+    probe.onload = async () => {
+      let url;
+      try {
+        url = await uploadImage(src);
+      } catch {
+        window.alert("Could not read that image file.");
+        return;
+      }
       const aspect = probe.naturalWidth / probe.naturalHeight || 1;
       const w = Math.max(40, (state.imageWidth || 1000) * 0.25);
       pushHistory();
       const pos = snapImage({ x: nx, y: ny });
-      const im = { id: uuid(), x: pos.x, y: pos.y, w, h: w / aspect, rotation: 0, src, showPlayers: false };
+      const im = { id: uuid(), x: pos.x, y: pos.y, w, h: w / aspect, rotation: 0, src: url, showPlayers: false };
       state.images.push(im);
       selectedToken = selectedNote = null;
       selectedImage = im;
