@@ -2016,6 +2016,34 @@ function scheduleSessionSave() {
   sessionSaveTimer = setTimeout(flushSessionSave, 800);
 }
 
+// Replace every inline image in the live state with an uploaded server URL, in place, so
+// autosaves stop re-sending data URLs (the demo map alone is ~17 MB). Each distinct image
+// is uploaded once per pass; one that fails to upload stays inline and is retried next time.
+async function externalizeStateImages(node, uploaded = new Map()) {
+  for (const key of Object.keys(node)) {
+    const value = node[key];
+    if (typeof value === "string" && value.startsWith("data:image/")) {
+      let url = uploaded.get(value);
+      if (!url) {
+        try {
+          url = await uploadImage(value);
+        } catch (error) {
+          console.error("could not upload image", error);
+          continue;
+        }
+        uploaded.set(value, url);
+      }
+      if (node[key] !== value) continue; // changed while uploading: keep the newer value
+      node[key] = url;
+      // Token art is cached by src; reuse the decoded image so tokens don't flicker.
+      const img = tokenImageCache.get(value);
+      if (img && !tokenImageCache.has(url)) tokenImageCache.set(url, img);
+    } else if (value && typeof value === "object") {
+      await externalizeStateImages(value, uploaded);
+    }
+  }
+}
+
 async function flushSessionSave() {
   if (sessionSaveInFlight) {
     sessionSavePending = true; // latest state wins: run again once the current PUT settles
@@ -2023,6 +2051,7 @@ async function flushSessionSave() {
   }
   sessionSaveInFlight = true;
   try {
+    await externalizeStateImages(state);
     captureCurrentFloor();
     await api("PUT", "/api/session", { state: JSON.parse(JSON.stringify(state)) });
     sessionRetryDelay = 2000;
