@@ -57,6 +57,7 @@ const controls = {
   openPlayer: document.getElementById("openPlayer"),
   exportLibrary: document.getElementById("exportLibrary"),
   importLibrary: document.getElementById("importLibrary"),
+  logout: document.getElementById("logout"),
   gridEnabled: document.getElementById("gridEnabled"),
   gridSnap: document.getElementById("gridSnap"),
   gridSize: document.getElementById("gridSize"),
@@ -238,6 +239,7 @@ const bedControls = {
 };
 
 const isPlayer = new URLSearchParams(window.location.search).get("view") === "player";
+const ONLINE = Boolean(window.LODESTAR_ONLINE);
 const DEFAULT_GM_FOG_OPACITY = 0.3;
 const INITIAL_FLOOR_ID = "floor-1";
 
@@ -733,6 +735,8 @@ function bindControls() {
   controls.saveSession.addEventListener("click", saveSession);
   controls.exportLibrary?.addEventListener("click", exportLibrary);
   controls.importLibrary?.addEventListener("change", importLibrary);
+  controls.logout?.classList.toggle("hidden", !(ONLINE && !isPlayer));
+  controls.logout?.addEventListener("click", logout);
   controls.openPlayer.addEventListener("click", openPlayerWindow);
 
   const gridBindings = [
@@ -1289,13 +1293,15 @@ async function deleteLibraryMap(id, name) {
 
 async function exportLibrary() {
   try {
-    const maps = await listMapRecords();
+    // Online, the server inlines stored images as data URLs so the file stays portable.
+    const payload = ONLINE ? await api("GET", "/api/export") : null;
+    const maps = payload ? payload.maps : await listMapRecords();
     if (!maps.length) {
       window.alert("There are no saved maps to export.");
       return;
     }
-    const payload = { app: APP_NAME, version: SAVE_FILE_VERSION, exportedAt: new Date().toISOString(), maps };
-    const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+    const exported = payload || { app: APP_NAME, version: SAVE_FILE_VERSION, exportedAt: new Date().toISOString(), maps };
+    const blob = new Blob([JSON.stringify(exported)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -1379,17 +1385,64 @@ async function withMapStore(modeName, action) {
   });
 }
 
-function saveMapRecord(record) {
+function idbSaveMapRecord(record) {
   return withMapStore("readwrite", (store) => store.put(record));
 }
-function listMapRecords() {
+function idbListMapRecords() {
   return withMapStore("readonly", (store) => store.getAll());
 }
-function getMapRecord(id) {
+function idbGetMapRecord(id) {
   return withMapStore("readonly", (store) => store.get(id));
 }
-function deleteMapRecord(id) {
+function idbDeleteMapRecord(id) {
   return withMapStore("readwrite", (store) => store.delete(id));
+}
+
+async function api(method, path, body) {
+  const options = { method, credentials: "same-origin", headers: {} };
+  if (body !== undefined) {
+    options.headers["Content-Type"] = "application/json";
+    options.body = JSON.stringify(body);
+  }
+  const response = await fetch(path, options);
+  if (response.status === 401) {
+    location.href = "/login";
+    throw new Error("Not logged in");
+  }
+  if (response.status === 204) return null;
+  const text = await response.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = null;
+  }
+  if (!response.ok) throw new Error(data?.error || data?.message || `Request failed (${response.status})`);
+  return data;
+}
+
+async function logout() {
+  try {
+    await api("POST", "/api/logout");
+  } catch {
+    // Fall through to the login page either way.
+  }
+  location.href = "/login";
+}
+
+const mapPath = (id) => `/api/maps/${encodeURIComponent(id)}`;
+
+function saveMapRecord(record) {
+  return ONLINE ? api("PUT", mapPath(record.id), record) : idbSaveMapRecord(record);
+}
+function listMapRecords() {
+  return ONLINE ? api("GET", "/api/maps") : idbListMapRecords();
+}
+function getMapRecord(id) {
+  return ONLINE ? api("GET", mapPath(id)) : idbGetMapRecord(id);
+}
+function deleteMapRecord(id) {
+  return ONLINE ? api("DELETE", mapPath(id)) : idbDeleteMapRecord(id);
 }
 
 /* ----------------------------- snapshots / sync ----------------------------- */
