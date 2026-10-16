@@ -1,0 +1,11 @@
+{
+  "name": "lodestar",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node server/index.js",
+    "test": "node --test server/test/*.test.js"
+  }
+}

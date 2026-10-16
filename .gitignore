@@ -16,3 +16,7 @@ launch.json
 # Logs / temp
 *.log
 tmp/
+
+# Online server
+data/
+node_modules/
