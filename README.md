@@ -54,6 +54,106 @@ Downloading the local version is the same story. The download contains only the 
 
 For anything you want to keep, use **Export** in the GM panel to save your whole library to a single JSON file you control, then **Import** it wherever you need it. That exported file is the only copy that isn't dependent on a browser setting, so it's the safe way to back up your maps or carry them from one computer to another.
 
+## Self-hosting the online edition
+
+Besides the static, local-first app above, Lodestar ships a small Node server (`server/`) that serves the same app and stores your maps and images on the server instead of in the browser. It has **no npm dependencies** and needs Node 22.13 or newer (it uses the built-in `node:sqlite`). The GM signs in with a single password; images are only served to a signed-in GM.
+
+### Running with Docker
+
+```sh
+docker build -t lodestar-online .
+docker run -d --name lodestar -p 8080:8080 \
+  -e LODESTAR_GM_PASSWORD='choose-a-strong-password' \
+  -v "$PWD/data:/data" \
+  lodestar-online
+```
+
+Open `http://localhost:8080` and sign in. The server refuses to start without `LODESTAR_GM_PASSWORD`. The image runs as the unprivileged `node` user, so a bind-mounted host directory must be writable by it (UID 1000); a named volume (`-v lodestar-data:/data`) works without extra steps.
+
+| Variable | Default | Description |
+|---|---|---|
+| `LODESTAR_GM_PASSWORD` | *(required)* | GM password. The server exits with an error if it is unset. |
+| `PORT` | `8080` | Port the server listens on (plain HTTP). |
+| `DATA_DIR` | `./data` (`/data` in Docker) | Where `lodestar.sqlite` and `images/` are stored. |
+
+Uploaded images are limited to 25 MB each, and a single saved map or import request to 50 MB.
+
+### Running with PM2 + nginx
+
+Without Docker, run the server directly. Node 22.13 or newer is required, and no `npm install` is needed. Create `ecosystem.config.cjs` next to the checkout:
+
+```js
+module.exports = {
+  apps: [{
+    name: "lodestar",
+    script: "server/index.js",
+    node_args: "--disable-warning=ExperimentalWarning",
+    env: {
+      PORT: 8080,
+      DATA_DIR: "/var/lib/lodestar",
+      LODESTAR_GM_PASSWORD: "choose-a-strong-password",
+    },
+  }],
+};
+```
+
+```sh
+pm2 start ecosystem.config.cjs && pm2 save
+```
+
+Then put nginx in front of it (`/etc/nginx/sites-available/lodestar.example.com`):
+
+```nginx
+server {
+    listen 80;
+    server_name lodestar.example.com;
+
+    client_max_body_size 50m;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Enable the site, reload nginx, then get a certificate (certbot adds the HTTPS server block and redirect):
+
+```sh
+certbot --nginx -d lodestar.example.com
+```
+
+### Reverse proxy and HTTPS
+
+The server speaks plain HTTP and expects a reverse proxy to terminate TLS. HTTPS is required for real use: the login cookie is marked `Secure` when the proxy sends `X-Forwarded-Proto: https`. The proxy must also pass WebSocket upgrades (needed from stage 2 onward). With Caddy, which handles certificates and WebSockets automatically:
+
+```
+lodestar.example.com {
+    reverse_proxy localhost:8080
+}
+```
+
+### Backups
+
+Everything lives in `DATA_DIR`: the database `lodestar.sqlite` and the uploaded files in `images/`. Back up by copying that directory. For a consistent copy while the server is running, snapshot the database first and copy the images alongside it:
+
+```sh
+cd "$DATA_DIR"
+sqlite3 lodestar.sqlite "VACUUM INTO 'backup.sqlite'"
+cp -r images /path/to/backup/
+mv backup.sqlite /path/to/backup/
+```
+
+### Tests
+
+```sh
+npm test
+```
+
 ## Keyboard shortcuts (GM)
 
 - `V` move · `P` polygon fog · `N` named fog area · `B` brush · `E` eraser · `T` tokens · `A` area of effect · `M` measure · `S` stairs
