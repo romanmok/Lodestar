@@ -46,3 +46,11 @@ test('serves manual assets', async () => {
   const r = await rawGet('/manual.html');
   assert.equal(r.status, 200);
 });
+
+test('login page links the public favicon', async () => {
+  const page = await rawGet('/login');
+  assert.match(page.body, /<link rel="icon" href="favicon\.svg" type="image\/svg\+xml">/);
+  const icon = await rawGet('/favicon.svg');
+  assert.equal(icon.status, 200);
+  assert.equal(icon.headers['content-type'], 'image/svg+xml');
+});
