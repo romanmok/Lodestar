@@ -2645,3 +2645,18 @@ input:disabled {
   right: 4px;
   width: 7px;
 }
+
+.save-indicator {
+  background: var(--panel-2);
+  border: 1px solid var(--danger);
+  border-radius: 999px;
+  bottom: 14px;
+  color: var(--danger);
+  font-size: 0.72rem;
+  font-weight: 700;
+  left: 14px;
+  padding: 5px 10px;
+  pointer-events: none;
+  position: fixed;
+  z-index: 50;
+}

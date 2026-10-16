@@ -451,6 +451,8 @@ function relay(message) {
   }
 }
 
+let dismissStartScreenNow = () => {};
+
 function setupStartScreen() {
   const screen = document.getElementById("startScreen");
   if (!screen) return;
@@ -480,6 +482,11 @@ function setupStartScreen() {
   demoBtn?.addEventListener("click", (event) => loadDemoMap(event.currentTarget, dismiss));
   document.getElementById("startCredits")?.addEventListener("click", () => document.getElementById("creditsDialog")?.showModal());
   window.addEventListener("keydown", onStartKey);
+  // Restoring a saved session skips the opening menu without the fade animation.
+  dismissStartScreenNow = () => {
+    window.removeEventListener("keydown", onStartKey);
+    screen.remove();
+  };
 }
 
 // Demo: load the bundled sample library (a Fantasy Atlas map) and reveal the app. The data
@@ -710,6 +717,12 @@ function setup() {
   refreshFloorUI();
   render();
   reportPlayerViewport(); // player: announce initial size for the GM's player-frame
+
+  if (ONLINE && !isPlayer) {
+    restoreSession().then((restored) => {
+      if (restored && state.floors.some((floor) => floor.imageData)) dismissStartScreenNow();
+    });
+  }
 }
 
 function bindControls() {
@@ -1911,6 +1924,86 @@ function sanitizedState() {
 function broadcastState() {
   if (isPlayer) return;
   relay({ type: "sync", state: sanitizedState() });
+  scheduleSessionSave();
+}
+
+/* ----------------------- online session autosave / restore ----------------------- */
+
+// Saving stays off until the server session has been read, so the empty state that exists
+// during setup can never overwrite a saved session.
+let sessionRestored = false;
+let sessionSaveTimer = null;
+let sessionSaveInFlight = false;
+let sessionSavePending = false;
+
+function setSaveIndicator(failed) {
+  let el = document.getElementById("saveIndicator");
+  if (!failed) {
+    el?.remove();
+    return;
+  }
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "saveIndicator";
+    el.className = "save-indicator";
+    el.setAttribute("role", "status");
+    el.textContent = "Not saved \u2014 retrying";
+    document.body.appendChild(el);
+  }
+}
+
+function scheduleSessionSave() {
+  if (!ONLINE || isPlayer || !sessionRestored) return;
+  clearTimeout(sessionSaveTimer);
+  sessionSaveTimer = setTimeout(flushSessionSave, 800);
+}
+
+async function flushSessionSave() {
+  if (sessionSaveInFlight) {
+    sessionSavePending = true; // latest state wins: run again once the current PUT settles
+    return;
+  }
+  sessionSaveInFlight = true;
+  try {
+    captureCurrentFloor();
+    await api("PUT", "/api/session", { state: JSON.parse(JSON.stringify(state)) });
+    setSaveIndicator(false);
+  } catch {
+    setSaveIndicator(true); // retried on the next change
+  } finally {
+    sessionSaveInFlight = false;
+    if (sessionSavePending) {
+      sessionSavePending = false;
+      scheduleSessionSave();
+    }
+  }
+}
+
+async function restoreSession() {
+  try {
+    const res = await api("GET", "/api/session");
+    if (res && res.state) {
+      shell.classList.remove("is-demo");
+      drawingRoom = [];
+      activeStroke = null;
+      undoStack.length = 0;
+      redoStack.length = 0;
+      updateUndoButtons();
+      loadSnapshot(migrateState(res.state, SAVE_FILE_VERSION));
+      syncControlsFromState();
+      broadcastAssets();
+      renderAndSync();
+      sessionRestored = true;
+      return true;
+    }
+    sessionRestored = true; // nothing saved yet: fresh session, autosave may begin
+    return false;
+  } catch (error) {
+    // Leave autosave off: saving an unrestored empty state could destroy the saved session.
+    setSaveIndicator(true);
+    console.error("could not restore session", error);
+    return false;
+  }
 }
 
 // Lightweight view-only message, coalesced to one per frame for smooth pan/zoom.
