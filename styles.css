@@ -121,6 +121,11 @@ button:hover {
   cursor: progress;
 }
 
+.start-enter:disabled {
+  cursor: progress;
+  filter: saturate(0.4) brightness(0.8);
+}
+
 .start-enter.is-loading::after {
   animation: loading-dots 1.2s steps(4, jump-none) infinite;
   content: "...";

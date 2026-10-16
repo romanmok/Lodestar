@@ -452,6 +452,8 @@ function relay(message) {
 }
 
 let dismissStartScreenNow = () => {};
+let setStartScreenBusy = () => {};
+let startScreenBusy = false;
 
 function setupStartScreen() {
   const screen = document.getElementById("startScreen");
@@ -468,6 +470,7 @@ function setupStartScreen() {
   };
   const onStartKey = (event) => {
     if (document.getElementById("creditsDialog")?.open) return; // let the open dialog handle keys
+    if (startScreenBusy) return;
     if (event.key === "Enter" || event.key === "Escape" || event.key === " ") {
       event.preventDefault();
       dismiss();
@@ -482,6 +485,26 @@ function setupStartScreen() {
   demoBtn?.addEventListener("click", (event) => loadDemoMap(event.currentTarget, dismiss));
   document.getElementById("startCredits")?.addEventListener("click", () => document.getElementById("creditsDialog")?.showModal());
   window.addEventListener("keydown", onStartKey);
+  // Online: Enter/Demo stay disabled until the saved session has been read, so nothing
+  // the GM does can race the restore.
+  setStartScreenBusy = (busy) => {
+    startScreenBusy = busy;
+    ["startEnter", "startDemo"].forEach((id) => {
+      const btn = document.getElementById(id);
+      if (btn) btn.disabled = busy;
+    });
+    let note = document.getElementById("startLoadingNote");
+    if (busy && !note) {
+      note = document.createElement("p");
+      note.id = "startLoadingNote";
+      note.className = "hint";
+      note.textContent = "Loading saved session\u2026";
+      document.querySelector(".start-actions")?.after(note);
+    } else if (!busy) {
+      note?.remove();
+    }
+  };
+  if (ONLINE) setStartScreenBusy(true);
   // Restoring a saved session skips the opening menu without the fade animation.
   dismissStartScreenNow = () => {
     window.removeEventListener("keydown", onStartKey);
@@ -720,6 +743,7 @@ function setup() {
 
   if (ONLINE && !isPlayer) {
     restoreSession().then((restored) => {
+      setStartScreenBusy(false);
       if (restored && state.floors.some((floor) => floor.imageData)) dismissStartScreenNow();
     });
   }
@@ -1936,9 +1960,9 @@ let sessionSaveTimer = null;
 let sessionSaveInFlight = false;
 let sessionSavePending = false;
 
-function setSaveIndicator(failed) {
+function setSaveIndicator(text) {
   let el = document.getElementById("saveIndicator");
-  if (!failed) {
+  if (!text) {
     el?.remove();
     return;
   }
@@ -1947,9 +1971,9 @@ function setSaveIndicator(failed) {
     el.id = "saveIndicator";
     el.className = "save-indicator";
     el.setAttribute("role", "status");
-    el.textContent = "Not saved \u2014 retrying";
     document.body.appendChild(el);
   }
+  el.textContent = text;
 }
 
 function scheduleSessionSave() {
@@ -1967,9 +1991,9 @@ async function flushSessionSave() {
   try {
     captureCurrentFloor();
     await api("PUT", "/api/session", { state: JSON.parse(JSON.stringify(state)) });
-    setSaveIndicator(false);
+    setSaveIndicator(null);
   } catch {
-    setSaveIndicator(true); // retried on the next change
+    setSaveIndicator("Not saved \u2014 retrying"); // retried on the next change
   } finally {
     sessionSaveInFlight = false;
     if (sessionSavePending) {
@@ -1980,29 +2004,36 @@ async function flushSessionSave() {
 }
 
 async function restoreSession() {
-  try {
-    const res = await api("GET", "/api/session");
-    if (res && res.state) {
-      shell.classList.remove("is-demo");
-      drawingRoom = [];
-      activeStroke = null;
-      undoStack.length = 0;
-      redoStack.length = 0;
-      updateUndoButtons();
-      loadSnapshot(migrateState(res.state, SAVE_FILE_VERSION));
-      syncControlsFromState();
-      broadcastAssets();
-      renderAndSync();
-      sessionRestored = true;
-      return true;
+  // Retry the GET (2 s doubling, capped at 30 s) until it succeeds; autosave stays off
+  // until then so an unrestored empty state can never overwrite the saved session.
+  let delay = 2000;
+  for (;;) {
+    try {
+      const res = await api("GET", "/api/session");
+      if (res && res.state) {
+        shell.classList.remove("is-demo");
+        drawingRoom = [];
+        activeStroke = null;
+        undoStack.length = 0;
+        redoStack.length = 0;
+        updateUndoButtons();
+        loadSnapshot(migrateState(res.state, SAVE_FILE_VERSION));
+        syncControlsFromState();
+        broadcastAssets();
+        renderAndSync();
+        sessionRestored = true; // after renderAndSync, so the restore itself is not re-saved
+        setSaveIndicator(null);
+        return true;
+      }
+      sessionRestored = true; // nothing saved yet: fresh session, autosave may begin
+      setSaveIndicator(null);
+      return false;
+    } catch (error) {
+      console.error("could not restore session", error);
+      setSaveIndicator("Couldn't load saved session \u2014 retrying");
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      delay = Math.min(delay * 2, 30000);
     }
-    sessionRestored = true; // nothing saved yet: fresh session, autosave may begin
-    return false;
-  } catch (error) {
-    // Leave autosave off: saving an unrestored empty state could destroy the saved session.
-    setSaveIndicator(true);
-    console.error("could not restore session", error);
-    return false;
   }
 }
 
