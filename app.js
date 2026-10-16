@@ -3531,7 +3531,9 @@ function addToken(native) {
 function bulkAddTokenImages(files) {
   const list = [...(files || [])].filter((f) => f.type.startsWith("image/"));
   if (!list.length || !state.imageData) return;
-  pushHistory();
+  const startImageId = state.imageId;
+  const startFloorId = state.currentFloorId;
+  let pushed = false;
   const cell = gridCellNative() || 70;
   const cols = Math.ceil(Math.sqrt(list.length));
   const rows = Math.ceil(list.length / cols);
@@ -3552,6 +3554,14 @@ function bulkAddTokenImages(files) {
       downscaleImage(reader.result, TOKEN_IMAGE_MAX_EDGE, (data) => {
         uploadImage(data).then(
           (url) => {
+            if (state.imageId !== startImageId || state.currentFloorId !== startFloorId) {
+              done(); // map or floor changed during the upload: drop this token
+              return;
+            }
+            if (!pushed) {
+              pushed = true;
+              pushHistory(); // snapshot just before the first token lands
+            }
             state.tokens.push({ id: uuid(), x: pos.x, y: pos.y, cells, color, label: "", image: url });
             done();
           },
@@ -3605,6 +3615,9 @@ function loadTokenImage(event) {
   const file = event.target.files[0];
   if (!file) return;
   const reader = new FileReader();
+  const startImageId = state.imageId;
+  const startFloorId = state.currentFloorId;
+  const targetToken = selectedToken; // the token selected when the file was chosen
   reader.onerror = () => window.alert("Could not read that image file.");
   reader.onload = () => {
     downscaleImage(reader.result, TOKEN_IMAGE_MAX_EDGE, async (data) => {
@@ -3615,12 +3628,13 @@ function loadTokenImage(event) {
         window.alert("Could not read that image file.");
         return;
       }
+      if (state.imageId !== startImageId || state.currentFloorId !== startFloorId) return;
       tokenImageData = url;
       // If a token is selected in Move mode, re-skin it immediately; otherwise this image
       // becomes the default for newly dropped tokens.
-      if (selectedToken) {
+      if (targetToken && state.tokens.includes(targetToken)) {
         pushHistory();
-        selectedToken.image = tokenImageData;
+        targetToken.image = tokenImageData;
         renderAndSync();
       }
       updateTokenImagePreview();
@@ -4174,6 +4188,8 @@ function swapPdf(rec) {
 
 // Add a map image from a (raw) data URL, centered at native (nx, ny). Downscaled to bound size.
 function addImageFromDataURL(rawSrc, nx, ny) {
+  const startImageId = state.imageId;
+  const startFloorId = state.currentFloorId;
   downscaleImage(rawSrc, IMAGE_MAX_EDGE, (src) => {
     const probe = new Image();
     probe.onload = async () => {
@@ -4184,6 +4200,7 @@ function addImageFromDataURL(rawSrc, nx, ny) {
         window.alert("Could not read that image file.");
         return;
       }
+      if (state.imageId !== startImageId || state.currentFloorId !== startFloorId) return;
       const aspect = probe.naturalWidth / probe.naturalHeight || 1;
       const w = Math.max(40, (state.imageWidth || 1000) * 0.25);
       pushHistory();
