@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lodestar - GM login</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body { display: flex; min-height: 100vh; align-items: center; justify-content: center; }
+    form { display: flex; flex-direction: column; gap: 12px; min-width: 260px; }
+    #err { color: #d66; min-height: 1.2em; margin: 0; }
+  </style>
+</head>
+<body>
+  <form id="f">
+    <h1>Lodestar</h1>
+    <input id="pw" type="password" placeholder="GM password" autocomplete="current-password" autofocus required>
+    <button type="submit">Log in</button>
+    <p id="err" role="alert"></p>
+  </form>
+  <script>
+    document.getElementById('f').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const err = document.getElementById('err');
+      err.textContent = '';
+      try {
+        const r = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ password: document.getElementById('pw').value }),
+        });
+        if (r.status === 200) location.href = '/';
+        else err.textContent = 'Wrong password';
+      } catch { err.textContent = 'Network error'; }
+    });
+  </script>
+</body>
+</html>
