@@ -74,6 +74,7 @@ Open `http://localhost:8080` and sign in. The server refuses to start without `L
 |---|---|---|
 | `LODESTAR_GM_PASSWORD` | *(required)* | GM password. The server exits with an error if it is unset. |
 | `PORT` | `8080` | Port the server listens on (plain HTTP). |
+| `HOST` | `127.0.0.1` (`0.0.0.0` in Docker) | Address the server binds to. The default only accepts connections from the same machine (the reverse proxy); set `0.0.0.0` to listen on all interfaces. |
 | `DATA_DIR` | `./data` (`/data` in Docker) | Where `lodestar.sqlite` and `images/` are stored. |
 
 Uploaded images are limited to 25 MB each, and a single saved map or import request to 50 MB.

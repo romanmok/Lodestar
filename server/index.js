@@ -7,7 +7,11 @@ if (!password) {
   process.exit(1);
 }
 const port = Number(process.env.PORT) || 8080;
+const host = process.env.HOST || '127.0.0.1';
 const dataDir = path.resolve(process.env.DATA_DIR || './data');
 
 const app = createApp({ dataDir, password });
-app.server.listen(port, () => console.log(`Lodestar server listening on :${port} (data: ${dataDir})`));
+app.server.listen(port, host, () => {
+  const { address } = app.server.address();
+  console.log(`Lodestar server listening on ${address}:${port} (data: ${dataDir})`);
+});
