@@ -143,10 +143,14 @@ Everything lives in `DATA_DIR`: the database `lodestar.sqlite` and the uploaded 
 
 ```sh
 export DATA_DIR=/var/lib/lodestar BACKUP_DIR=/path/to/backup
+DEST="$BACKUP_DIR/$(date +%F-%H%M%S)"
 [ -f "$DATA_DIR/lodestar.sqlite" ] \
-  && sqlite3 "$DATA_DIR/lodestar.sqlite" "VACUUM INTO '$BACKUP_DIR/lodestar.sqlite'" \
-  && cp -r "$DATA_DIR/images" "$BACKUP_DIR/"
+  && mkdir -p "$DEST" \
+  && sqlite3 "$DATA_DIR/lodestar.sqlite" "VACUUM INTO '$DEST/lodestar.sqlite'" \
+  && { [ ! -d "$DATA_DIR/images" ] || cp -r "$DATA_DIR/images" "$DEST/"; }
 ```
+
+Each run writes a new timestamped folder under `BACKUP_DIR`, so it is safe to schedule repeatedly. `images/` only exists once something has been uploaded, so a fresh install backs up just the database.
 
 ### Tests
 
